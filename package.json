@@ -1,4 +1,12 @@
 {
+  "name": "training-analisis-cognitivo",
+  "version": "1.0.0",
+  "description": "Materiales didácticos y pipeline automatizado de generación para el curso de especialización en Analítica Avanzada e Inteligencia Cognitiva (15 horas)",
+  "scripts": {
+    "build": "node generator/build_deck.js",
+    "guide": "node generator/generate_guide.js",
+    "generate": "npm run build && npm run guide"
+  },
   "dependencies": {
     "pptxgenjs": "^4.0.1"
   }
