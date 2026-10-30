@@ -4,10 +4,16 @@
   "description": "Materiales didácticos y pipeline automatizado de generación para el curso de especialización en Analítica Avanzada e Inteligencia Cognitiva (15 horas)",
   "scripts": {
     "build": "node generator/build_deck.js",
+    "build:pdf": "libreoffice --headless --convert-to pdf --outdir . Analitica_Avanzada_e_Inteligencia_Cognitiva.pptx",
     "guide": "node generator/generate_guide.js",
-    "generate": "npm run build && npm run guide"
+    "generate": "npm run build && npm run build:pdf && npm run guide"
   },
   "dependencies": {
-    "pptxgenjs": "^4.0.1"
+    "jszip": "^3.10.1",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-icons": "^5.4.0",
+    "sharp": "^0.33.5"
   }
 }

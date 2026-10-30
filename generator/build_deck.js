@@ -1,67 +1,119 @@
 // generator/build_deck.js
-// Main script to assemble the complete 41-slide training deck
+// Pipeline principal de compilación y maquetación del slide deck oficial:
+// "Analítica Avanzada e Inteligencia Cognitiva" (15 Horas Lectivas).
+// Implementa el estándar panorámico Widescreen 16:9 (13.333" x 7.5"),
+// precarga dinámica de iconos vectoriales react-icons/fa con sharp,
+// verificación predictiva de 0 desbordamientos (0 warnings) y saneamiento OOXML con JSZip.
 
-const pptxgen = require('pptxgenjs');
+const fs = require('fs');
 const path = require('path');
-const config = require('./config');
+const JSZip = require('jszip');
+const H = require('./layout_helpers');
 
-const buildModule0 = require('./modules/module0_intro');
-const buildModule1 = require('./modules/module1_advanced_analytics');
-const buildModule2 = require('./modules/module2_cognitive_ai');
-const buildModule3 = require('./modules/module3_predictive_ml');
-const buildModule4 = require('./modules/module4_nlp_sentiment');
-const buildModule5 = require('./modules/module5_visualization');
-const buildModule6 = require('./modules/module6_cases_projects');
+const MODULE_FILES = [
+  'module0_intro.js',
+  'module1_advanced_analytics.js',
+  'module2_cognitive_ai.js',
+  'module3_predictive_ml.js',
+  'module4_nlp_sentiment.js',
+  'module5_visualization.js',
+  'module6_cases_projects.js',
+];
 
-async function generateDeck() {
-  console.log('🚀 Iniciando compilación de la presentación técnica...');
+const OUT = process.env.OUT || path.resolve(__dirname, '..', 'Analitica_Avanzada_e_Inteligencia_Cognitiva.pptx');
+
+async function buildDeck() {
+  console.log('🚀 Iniciando compilación de la presentación técnica Widescreen 16:9...');
   console.log('Curso: Analítica Avanzada e Inteligencia Cognitiva (15H)');
 
-  const pres = new pptxgen();
-  pres.layout = config.layout; // LAYOUT_16x9 (10" x 5.625")
-  pres.author = 'Instructor Senior en Analítica e IA';
+  // 1. Detección automática y precarga de todos los iconos referenciados en código fuente
+  const filesToScan = ['layout_helpers.js', ...MODULE_FILES.map((m) => path.join('modules', m))];
+  const detectedIcons = new Set([
+    'FaCheckCircle',
+    'FaLightbulb',
+    'FaExclamationTriangle',
+    'FaAngleRight',
+  ]);
+
+  for (const relPath of filesToScan) {
+    const fullPath = path.join(__dirname, relPath);
+    if (!fs.existsSync(fullPath)) continue;
+    const content = fs.readFileSync(fullPath, 'utf8');
+    for (const match of content.matchAll(/\bFa[A-Z][A-Za-z0-9]+\b/g)) {
+      detectedIcons.add(match[0]);
+    }
+  }
+
+  console.log(`🎨 Precargando y rasterizando ${detectedIcons.size} iconos vectoriales...`);
+  await H.preloadIcons([...detectedIcons]);
+
+  // 2. Inicialización de la presentación con lienzo 16:9 de 13.333" x 7.5"
+  H.state.n = 0;
+  H.state.slides = [];
+  H.state.warnings = [];
+  H.state.cur = null;
+
+  const pres = new H.pptxgen();
+  pres.layout = 'LAYOUT_WIDE'; // 13.333" x 7.5" (16:9)
+  pres.title = 'Analítica Avanzada e Inteligencia Cognitiva (15 h)';
+  pres.subject = 'Curso Oficial de Formación Técnica en Analítica e IA';
+  pres.author = 'Instructor Senior en Analítica e Inteligencia Cognitiva';
   pres.company = 'Programa de Especialización Técnica';
-  pres.title = 'Analítica Avanzada e Inteligencia Cognitiva';
-  pres.subject = 'Slide Deck formativo completo (15 Horas Lectivas)';
 
-  const state = {
-    slideCount: 0,
-    totalSlides: 41,
-  };
+  // 3. Ejecución secuencial de los 6 módulos didácticos (Módulo 0 al Módulo 6)
+  for (const modFile of MODULE_FILES) {
+    const modPath = path.join(__dirname, 'modules', modFile);
+    if (!fs.existsSync(modPath)) {
+      console.warn(`(aviso) Módulo no encontrado: ${modFile}`);
+      continue;
+    }
+    const before = H.state.n;
+    const builder = require(modPath);
+    await builder(pres, H);
+    console.log(`📦 ${modFile}: ${H.state.n - before} diapositivas compiladas (acumulado ${H.state.n})`);
+  }
 
-  // Compile modules sequentially
-  console.log('📦 Construyendo Módulo 0: Encuadre, Objetivos y Cronograma...');
-  buildModule0(pres, state);
+  // 4. Saneamiento OOXML con JSZip (eliminación de etiquetas <a:pPr> duplicadas)
+  console.log('\n🧹 Saneando esquema OOXML y eliminando duplicidades <a:pPr>...');
+  const rawBuffer = await pres.write({ outputType: 'nodebuffer' });
+  const zip = await JSZip.loadAsync(rawBuffer);
+  const PPR_REGEX = /<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/g;
 
-  console.log('📦 Construyendo Módulo 1: Introducción a la Analítica Avanzada...');
-  buildModule1(pres, state);
+  const slideXmlFiles = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n));
+  for (const name of slideXmlFiles) {
+    const xml = await zip.file(name).async('string');
+    const sanitizedXml = xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (m, inner) => {
+      let first = true;
+      const body = inner.replace(PPR_REGEX, (pp) =>
+        first && inner.trimStart().startsWith('<a:pPr') ? ((first = false), pp) : ''
+      );
+      return `<a:p>${body}</a:p>`;
+    });
+    zip.file(name, sanitizedXml);
+  }
 
-  console.log('📦 Construyendo Módulo 2: Fundamentos de la Inteligencia Cognitiva...');
-  buildModule2(pres, state);
+  // 5. Escritura final del archivo PPTX
+  const finalBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  fs.writeFileSync(OUT, finalBuffer);
 
-  console.log('📦 Construyendo Módulo 3: Modelos Predictivos y Machine Learning...');
-  buildModule3(pres, state);
+  console.log(`\n💾 Archivo PPTX generado exitosamente: ${OUT}`);
+  console.log(`📊 Total de diapositivas: ${H.state.n}`);
 
-  console.log('📦 Construyendo Módulo 4: Análisis de Sentimientos y NLP...');
-  buildModule4(pres, state);
-
-  console.log('📦 Construyendo Módulo 5: Visualización de Datos Avanzada...');
-  buildModule5(pres, state);
-
-  console.log('📦 Construyendo Módulo 6: Casos Prácticos, MLOps y Proyecto...');
-  buildModule6(pres, state);
-
-  console.log(`✅ Total de diapositivas generadas: ${state.slideCount} de ${state.totalSlides}`);
-
-  const outputFileName = 'Analitica_Avanzada_e_Inteligencia_Cognitiva.pptx';
-  const outputPath = path.resolve(__dirname, '..', outputFileName);
-
-  console.log(`💾 Guardando archivo en: ${outputPath}...`);
-  await pres.writeFile({ fileName: outputPath });
-  console.log('🎉 ¡Presentación PPTX generada exitosamente!');
+  // 6. Auditoría de avisos de maquetación y desbordamientos tipográficos
+  if (H.state.warnings.length > 0) {
+    console.warn(`\n⚠️ Se han detectado ${H.state.warnings.length} advertencias de maquetación/desbordamiento:`);
+    H.state.warnings.forEach((w) => console.warn(`   - ${w}`));
+    throw new Error('La compilación falló el criterio de 0 advertencias de desbordamiento.');
+  } else {
+    console.log('✨ Verificación impecable: 0 advertencias de maquetación. Todas las cajas y textos encajan a la perfección.');
+  }
 }
 
-generateDeck().catch((err) => {
-  console.error('❌ Error compilando el slide deck:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  buildDeck().catch((err) => {
+    console.error('❌ Error compilando el slide deck:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = buildDeck;
